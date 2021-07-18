@@ -50,63 +50,66 @@ time_fmt="real %e\nrss %M"
 time_txt=`mktemp`
 echo > log.txt
 
-printf "┌─%s─┬───────────────────────┬───────────────────────┬─────────────────────┐\n"\
-  `head -c $longest_filename < /dev/zero | tr '\0' '─'`
-printf "│ %${longest_filename}s │         ARGS 1        │         ARGS 2        │   Difference (1/2)  │\n" ""
-printf "│ %${longest_filename}s ├┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┤\n" "Program"
-printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %8s │ %8s │"\
+printf "┌─%s─┬───────────────────────┬───────────────────────┬─────────────────────────┐\n"\
+  `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
+printf "│ %${longest_filename}s │         ARGS 1        │         ARGS 2        │     Difference (1/2)    │\n" ""
+printf "│ %${longest_filename}s ├┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┤\n" "Program"
+printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %10s │ %10s │\n"\
   " " "Time" "Memory" "Time" "Memory" "Time" "Memory"
+printf "├─%s─┼────────[s]─┼─────[GB]─┼────────[s]─┼─────[GB]─┼────────────┼────────────┤\n"\
+  `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
 
 for f in $files; do
   cmd="$wpa $args1 $f"
-  echo "  = running $cmd"
-  echo "@@@@@@@@\n$cmd\n" >> log.txt
-  if $timeout_cmd $time_limit_s \
+  oox1=""
+  oox2=""
+
+  echo "  = running $cmd" >> log.txt
+  if $timeout_cmd --foreground $time_limit_s \
        $time_cmd -f "$time_fmt" -o "$time_txt" \
        prlimit --as=$mem_limit_b: \
-       $cmd $f >> log.txt; then
-    echo "    = success"
+       $cmd $f >> log.txt 2>&1; then
+    echo "    = success" >> log.txt
     time1=`grep real $time_txt | cut -f2 -d\ `
-    disp_time1="$time1"
-    mem1=`grep real $time_txt | cut -f2 -d\ `
-    disp_mem1="$time1"
+    disp_time1=$(printf "%10.2f" "$time1")
+    mem1=`grep rss $time_txt | cut -f2 -d\ `
+    disp_mem1=$(printf "%8.2f" $(echo "$mem1 / 1000 / 1000" | bc -l))
   else
     if [ $? -eq 124 ]; then
-      echo "    = OOT"
+      echo "    = OOT" >> log.txt
       oox1="OOT"
       time1=$time_limit_s
-      disp_time2="OOT"
-      disp_mem2="--"
+      disp_time1="OOT"
+      disp_mem1="--"
     else
-      echo "    = OOM"
+      echo "    = OOM" >> log.txt
       oox1="OOM"
       mem1=$mem_limit_b
-      disp_time2="--"
-      disp_mem2="OOM"
+      disp_time1="--"
+      disp_mem1="OOM"
     fi
   fi
 
   cmd="$wpa $args2 $f"
-  echo "  = running $cmd"
-  echo "@@@@@@@@\n$cmd\n" >> log.txt
-  if $timeout_cmd $time_limit_s \
+  echo "  = running $cmd" >> log.txt
+  if $timeout_cmd --foreground $time_limit_s \
        $time_cmd -f "$time_fmt" -o "$time_txt" \
        prlimit --as=$mem_limit_b: \
-       $cmd $f >> log.txt; then
-    echo "    = success"
+       $cmd $f >> log.txt 2>&1; then
+    echo "    = success" >> log.txt
     time2=`grep real $time_txt | cut -f2 -d\ `
-    disp_time2="$time2"
-    mem2=`grep real $time_txt | cut -f2 -d\ `
-    disp_mem2="$mem2"
+    disp_time2=$(printf "%8.2f" "$time2")
+    mem2=`grep rss $time_txt | cut -f2 -d\ `
+    disp_mem2=$(printf "%8.2f" $(echo "$mem2 / 1000 / 1000" | bc -l))
   else
     if [ $? -eq 124 ]; then
-      echo "    = OOT"
+      echo "    = OOT" >> log.txt
       oox2="OOT"
       time2=$time_limit_s
       disp_time2="OOT"
       disp_mem2="--"
     else
-      echo "    = OOM"
+      echo "    = OOM" >> log.txt
       oox2="OOM"
       mem2=$mem_limit_b
       disp_time2="--"
@@ -114,7 +117,32 @@ for f in $files; do
     fi
   fi
 
-  printf "│ %$longest_filename │ %10.2f │ %8.2f │ %10.2f │ %8.2f │ %8.2f │ %8.2f │"\
-    "$f" "$disp_time1" "$disp_mem1" "$disp_time2" "$disp_mem2" $(($time1/$time2)) $(($mem1/$mem2))
+  time_diff=$(printf "%.2f" $(echo $time1 / $time2 | bc -l))
+  mem_diff=$(printf "%.2f" $(echo $mem1 / $mem2 | bc -l))
+
+  if [ -n "$oox1" -a -n "$oox2" ]; then
+    time_diff="--"
+    mem_diff="--"
+  elif [ "$oox1" = "OOT" ]; then
+    time_diff=$(printf "%9s" ">=$time_diff")
+    mem_diff="--"
+  elif [ "$oox2" = "OOT" ]; then
+    time_diff=$(printf "%9s" "<=$time_diff")
+    mem_diff="--"
+  elif [ "$oox1" = "OOM" ]; then
+    time_diff="--"
+    mem_diff=$(printf "%9s" ">=$mem_diff")
+  elif [ "$oox2" = "OOM" ]; then
+    time_diff="--"
+    mem_diff=$(printf "%9s" "<=$mem_diff")
+  else
+    time_diff=$(printf "%9s" "$time_diff")
+    mem_diff=$(printf "%9s" "$mem_diff")
+  fi
+
+  printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %9sx │ %9sx │\n"\
+    "$f" "$disp_time1" "$disp_mem1" "$disp_time2" "$disp_mem2" "$time_diff" "$mem_diff"
 done
 
+printf "└─%s─┴───────────────────────┴───────────────────────┴─────────────────────────┘\n"\
+  `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
