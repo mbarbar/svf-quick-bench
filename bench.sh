@@ -51,17 +51,18 @@ time_txt=`mktemp`
 echo > log.txt
 
 printf "┌─%s─┬───────────────────────┬───────────────────────┬───────────────────────────┐\n"\
-  `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
+  $(head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g')
 printf "│ %${longest_filename}s │         ARGS 1        │         ARGS 2        │      Difference (1/2)     │\n" ""
 printf "│ %${longest_filename}s ├┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┄┤\n" "Program"
 printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %11s │ %11s │\n"\
   " " "Time" "Memory" "Time" "Memory" "Time" "Memory"
 printf "├─%s─┼────────[s]─┼─────[GB]─┼────────[s]─┼─────[GB]─┼─────────────┼─────────────┤\n"\
-  `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
+  $(head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g')
 
 mem_diff_product_cmd="1"
 time_diff_product_cmd="1"
 
+# Whether the mean time/mem. diff. needs to have a sign in front of it.
 mean_time_diff_gt=""
 mean_time_diff_lt=""
 mean_mem_diff_gt=""
@@ -98,6 +99,7 @@ for f in $files; do
     fi
   fi
 
+  # Repeat twice, easier than a loop.
   cmd="$wpa $args2 $f"
   echo "  = running $cmd" >> log.txt
   if $timeout_cmd --foreground $time_limit_s \
@@ -125,6 +127,8 @@ for f in $files; do
     fi
   fi
 
+  # Recall, when OOM, we set mem to be the memory limit. Similarly for OOT/time.
+  # When OOM or OOT, we can calculate time or memory, respectively.
   if [ "$oox1" != "OOM" -a "$oox2" != "OOM" ]; then
     time_diff=$(printf "%.2f" $(echo $time1 / $time2 | bc -l))
   fi
@@ -133,6 +137,7 @@ for f in $files; do
     mem_diff=$(printf "%.2f" $(echo $mem1 / $mem2 | bc -l))
   fi
 
+  # Whether we have a value or not depends on whether we went OOM/OOT.
   if [ -n "$oox1" -a -n "$oox2" ]; then
     time_diff="--"
     mem_diff="--"
@@ -167,11 +172,30 @@ for f in $files; do
     "$f" "$disp_time1" "$disp_mem1" "$disp_time2" "$disp_mem2" "$time_diff" "$mem_diff"
 done
 
+# We might have gotten <==> so we need to sed it out.
 time_diff_sign=$(echo "${time_diff_lt}${time_diff_gt}" | sed -e 's/==/=/')
 mem_diff_sign=$(echo "${mem_diff_lt}${mem_diff_gt}" | sed -e 's/==/=/')
 
-disp_time_diff_geomean=$(printf "${time_diff_sign}%.2f" $(echo "sqrt($time_diff_product_cmd)" | bc -l))
-disp_mem_diff_geomean=$(printf "${mem_diff_sign}%.2f" $(echo "sqrt($mem_diff_product_cmd)" | bc -l))
+# Count the number of asteriks (multiplication) in the diff command. 0 means we have no diffs, 1 means
+# we have 1 diff and so the mean is just that, and for any more we perform the standard mean calculation.
+mult_in_time_diff=$(echo "$time_diff_product_cmd" | tr -cd '*' | wc -c)
+mult_in_mem_diff=$(echo "$mem_diff_product_cmd" | tr -cd '*' | wc -c)
+
+if [ "$mult_in_time_diff" -gt 1 ]; then
+  disp_time_diff_geomean=$(printf "${time_diff_sign}%.2f" $(echo "sqrt($time_diff_product_cmd)" | bc -l))
+elif [ "$mult_in_time_diff" -eq 1 ]; then
+  disp_time_diff_geomean=$(printf "${time_diff_sign}%.2f" $(echo "$time_diff_product_cmd" | bc -l))
+else
+  disp_time_diff_geomean="--"
+fi
+
+if [ "$mult_in_mem_diff" -gt 1 ]; then
+  disp_mem_diff_geomean=$(printf "${mem_diff_sign}%.2f" $(echo "sqrt($mem_diff_product_cmd)" | bc -l))
+elif [ "$mult_in_mem_diff" -eq 1 ]; then
+  disp_mem_diff_geomean=$(printf "${mem_diff_sign}%.2f" $(echo "$mem_diff_product_cmd" | bc -l))
+else
+  disp_mem_diff_geomean="--"
+fi
 
 printf "├─%s─┼───────────────────────────────────────────────┼─────────────┼─────────────┤\n"\
   $(head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g')
