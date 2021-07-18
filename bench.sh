@@ -1,6 +1,8 @@
 #!/bin/sh
 
+# GNU time command/path.
 time_cmd="/usr/bin/time"
+# GNU coreutils timeout command/path.
 timeout_cmd="timeout"
 
 usage_exit() {
