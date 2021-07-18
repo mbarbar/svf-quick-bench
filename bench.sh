@@ -25,8 +25,8 @@ nfiles=`expr $#`
 [ -r "$wpa" ] || usage_exit
 expr "$time_limit" : "[0-9][0-9]*" > /dev/null || usage_exit
 expr "$mem_limit" : "[0-9][0-9]*" > /dev/null || usage_exit
-# 7 is the length of "Program".
-longest_filename=7
+# 9 is the length of "Geo. Mean".
+longest_filename=9
 for f in $files; do
   [ -r "$f" ] || usage_exit;
   if [ "${#f}" -gt "$longest_filename" ]; then
@@ -50,14 +50,22 @@ time_fmt="real %e\nrss %M"
 time_txt=`mktemp`
 echo > log.txt
 
-printf "┌─%s─┬───────────────────────┬───────────────────────┬─────────────────────────┐\n"\
+printf "┌─%s─┬───────────────────────┬───────────────────────┬───────────────────────────┐\n"\
   `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
-printf "│ %${longest_filename}s │         ARGS 1        │         ARGS 2        │     Difference (1/2)    │\n" ""
-printf "│ %${longest_filename}s ├┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┤\n" "Program"
-printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %10s │ %10s │\n"\
+printf "│ %${longest_filename}s │         ARGS 1        │         ARGS 2        │      Difference (1/2)     │\n" ""
+printf "│ %${longest_filename}s ├┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┄┤\n" "Program"
+printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %11s │ %11s │\n"\
   " " "Time" "Memory" "Time" "Memory" "Time" "Memory"
-printf "├─%s─┼────────[s]─┼─────[GB]─┼────────[s]─┼─────[GB]─┼────────────┼────────────┤\n"\
+printf "├─%s─┼────────[s]─┼─────[GB]─┼────────[s]─┼─────[GB]─┼─────────────┼─────────────┤\n"\
   `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
+
+mem_diff_product_cmd="1"
+time_diff_product_cmd="1"
+
+mean_time_diff_gt=""
+mean_time_diff_lt=""
+mean_mem_diff_gt=""
+mean_mem_diff_lt=""
 
 for f in $files; do
   cmd="$wpa $args1 $f"
@@ -84,7 +92,7 @@ for f in $files; do
     else
       echo "    = OOM" >> log.txt
       oox1="OOM"
-      mem1=$mem_limit_b
+      mem1=$(($mem_limit_b / 1000))
       disp_time1="--"
       disp_mem1="OOM"
     fi
@@ -111,38 +119,63 @@ for f in $files; do
     else
       echo "    = OOM" >> log.txt
       oox2="OOM"
-      mem2=$mem_limit_b
+      mem2=$(($mem_limit_b / 1000))
       disp_time2="--"
       disp_mem2="OOM"
     fi
   fi
 
-  time_diff=$(printf "%.2f" $(echo $time1 / $time2 | bc -l))
-  mem_diff=$(printf "%.2f" $(echo $mem1 / $mem2 | bc -l))
+  if [ "$oox1" != "OOM" -a "$oox2" != "OOM" ]; then
+    time_diff=$(printf "%.2f" $(echo $time1 / $time2 | bc -l))
+  fi
+
+  if [ "$oox1" != "OOT" -a "$oox2" != "OOT" ]; then
+    mem_diff=$(printf "%.2f" $(echo $mem1 / $mem2 | bc -l))
+  fi
 
   if [ -n "$oox1" -a -n "$oox2" ]; then
     time_diff="--"
     mem_diff="--"
   elif [ "$oox1" = "OOT" ]; then
+    time_diff_product_cmd="$time_diff_product_cmd * $time_diff"
     time_diff=$(printf "%9s" ">=$time_diff")
+    time_diff_gt=">="
     mem_diff="--"
   elif [ "$oox2" = "OOT" ]; then
+    time_diff_product_cmd="$time_diff_product_cmd * $time_diff"
     time_diff=$(printf "%9s" "<=$time_diff")
+    time_diff_lt="<="
     mem_diff="--"
   elif [ "$oox1" = "OOM" ]; then
     time_diff="--"
+    mem_diff_product_cmd="$mem_diff_product_cmd * $mem_diff"
     mem_diff=$(printf "%9s" ">=$mem_diff")
+    mem_diff_gt=">="
   elif [ "$oox2" = "OOM" ]; then
     time_diff="--"
+    mem_diff_product_cmd="$mem_diff_product_cmd * $mem_diff"
     mem_diff=$(printf "%9s" "<=$mem_diff")
+    mem_diff_lt="<="
   else
+    time_diff_product_cmd="$time_diff_product_cmd * $time_diff"
     time_diff=$(printf "%9s" "$time_diff")
+    mem_diff_product_cmd="$mem_diff_product_cmd * $mem_diff"
     mem_diff=$(printf "%9s" "$mem_diff")
   fi
 
-  printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %9sx │ %9sx │\n"\
+  printf "│ %${longest_filename}s │ %10s │ %8s │ %10s │ %8s │ %10sx │ %10sx │\n"\
     "$f" "$disp_time1" "$disp_mem1" "$disp_time2" "$disp_mem2" "$time_diff" "$mem_diff"
 done
 
-printf "└─%s─┴───────────────────────┴───────────────────────┴─────────────────────────┘\n"\
-  `head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g'`
+time_diff_sign=$(echo "${time_diff_lt}${time_diff_gt}" | sed -e 's/==/=/')
+mem_diff_sign=$(echo "${mem_diff_lt}${mem_diff_gt}" | sed -e 's/==/=/')
+
+disp_time_diff_geomean=$(printf "${time_diff_sign}%.2f" $(echo "sqrt($time_diff_product_cmd)" | bc -l))
+disp_mem_diff_geomean=$(printf "${mem_diff_sign}%.2f" $(echo "sqrt($mem_diff_product_cmd)" | bc -l))
+
+printf "├─%s─┼───────────────────────────────────────────────┼─────────────┼─────────────┤\n"\
+  $(head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g')
+printf "│ %${longest_filename}s │                                               │ %10sx │ %10sx │\n"\
+  "Geo. Mean" "$disp_time_diff_geomean" "$disp_mem_diff_geomean" 
+printf "└─%s─┴───────────────────────────────────────────────┴───────────────────────────┘\n"\
+  $(head -c $longest_filename < /dev/zero | sed -e 's/\x0/─/g')
