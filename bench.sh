@@ -36,7 +36,6 @@ for f in $files; do
   fi
 done
 
-echo " ===== Clustering Benchmark ===== "
 echo "  = args = "
 echo "    svf binary    : $wpa"
 echo "    args1         : $args1"
